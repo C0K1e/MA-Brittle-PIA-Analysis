@@ -1,0 +1,140 @@
+ALLSEL,ALL
+*GET, nElem, ELEM, 0, COUNT
+ETABLE, EVOL, VOLU
+
+! --- File A: Volumen/Smax Datei (-V.out) ---
+*CFOPEN,temp_EM_RAW_V,out
+*VWRITE,'smax = ',smax
+(A7,E16.8)
+*VWRITE,'Elem','Vol'
+(A6,1X,A10)
+
+! Schlanker Vol-Loop (kein ESEL-Trick noetig, nur Geometrie)
+*DO, elem_id, 1, nElem
+   *GET, vol, ELEM, elem_id, ETAB, EVOL
+   *VWRITE, elem_id, vol
+   (F14.0,1X,E20.12)
+*ENDDO
+*CFCLOSE
+
+! ========= AUSKOMMENTIERT: Alter ESEL-Trick-Loop =========
+! Elementweiser *GET-Loop (8 Eckknoten-Mittelwert in APDL).
+! Ersetzt durch PRESOL-Listing (-S.out) + Python-Mittelwertbildung.
+!
+!/GRAPH, FULL
+!/AVRES, 0
+!
+!*DO, elem_id, 1, nElem
+!
+!   ! --- TRICK FUER RAW DATEN ---
+!   ESEL, S, ELEM, , elem_id
+!   NSLE, S, ALL
+!
+!   *GET, vol, ELEM, elem_id, ETAB, EVOL
+!   *GET, n1, ELEM, elem_id, NODE, 1
+!   *GET, n2, ELEM, elem_id, NODE, 2
+!   *GET, n3, ELEM, elem_id, NODE, 3
+!   *GET, n4, ELEM, elem_id, NODE, 4
+!   *GET, n5, ELEM, elem_id, NODE, 5
+!   *GET, n6, ELEM, elem_id, NODE, 6
+!   *GET, n7, ELEM, elem_id, NODE, 7
+!   *GET, n8, ELEM, elem_id, NODE, 8
+!
+!   *IF,n1,EQ,0,CYCLE
+!   S1sum = 0
+!   S2sum = 0
+!   S3sum = 0
+!   s1max = -1E20
+!   s1min = 1E20
+!   *GET, v1, NODE, n1, S, 1
+!   *GET, v2, NODE, n1, S, 2
+!   *GET, v3, NODE, n1, S, 3
+!   S1sum = S1sum + v1
+!   S2sum = S2sum + v2
+!   S3sum = S3sum + v3
+!   s1max = v1
+!   s1min = v1
+!   *GET, v1, NODE, n2, S, 1
+!   *GET, v2, NODE, n2, S, 2
+!   *GET, v3, NODE, n2, S, 3
+!   S1sum = S1sum + v1
+!   S2sum = S2sum + v2
+!   S3sum = S3sum + v3
+!   s1max = (v1 > s1max) * v1 + (v1 <= s1max) * s1max
+!   s1min = (v1 < s1min) * v1 + (v1 >= s1min) * s1min
+!   *GET, v1, NODE, n3, S, 1
+!   *GET, v2, NODE, n3, S, 2
+!   *GET, v3, NODE, n3, S, 3
+!   S1sum = S1sum + v1
+!   S2sum = S2sum + v2
+!   S3sum = S3sum + v3
+!   s1max = (v1 > s1max) * v1 + (v1 <= s1max) * s1max
+!   s1min = (v1 < s1min) * v1 + (v1 >= s1min) * s1min
+!   *GET, v1, NODE, n4, S, 1
+!   *GET, v2, NODE, n4, S, 2
+!   *GET, v3, NODE, n4, S, 3
+!   S1sum = S1sum + v1
+!   S2sum = S2sum + v2
+!   S3sum = S3sum + v3
+!   s1max = (v1 > s1max) * v1 + (v1 <= s1max) * s1max
+!   s1min = (v1 < s1min) * v1 + (v1 >= s1min) * s1min
+!   *GET, v1, NODE, n5, S, 1
+!   *GET, v2, NODE, n5, S, 2
+!   *GET, v3, NODE, n5, S, 3
+!   S1sum = S1sum + v1
+!   S2sum = S2sum + v2
+!   S3sum = S3sum + v3
+!   s1max = (v1 > s1max) * v1 + (v1 <= s1max) * s1max
+!   s1min = (v1 < s1min) * v1 + (v1 >= s1min) * s1min
+!   *GET, v1, NODE, n6, S, 1
+!   *GET, v2, NODE, n6, S, 2
+!   *GET, v3, NODE, n6, S, 3
+!   S1sum = S1sum + v1
+!   S2sum = S2sum + v2
+!   S3sum = S3sum + v3
+!   s1max = (v1 > s1max) * v1 + (v1 <= s1max) * s1max
+!   s1min = (v1 < s1min) * v1 + (v1 >= s1min) * s1min
+!   *GET, v1, NODE, n7, S, 1
+!   *GET, v2, NODE, n7, S, 2
+!   *GET, v3, NODE, n7, S, 3
+!   S1sum = S1sum + v1
+!   S2sum = S2sum + v2
+!   S3sum = S3sum + v3
+!   s1max = (v1 > s1max) * v1 + (v1 <= s1max) * s1max
+!   s1min = (v1 < s1min) * v1 + (v1 >= s1min) * s1min
+!   *GET, v1, NODE, n8, S, 1
+!   *GET, v2, NODE, n8, S, 2
+!   *GET, v3, NODE, n8, S, 3
+!   S1sum = S1sum + v1
+!   S2sum = S2sum + v2
+!   S3sum = S3sum + v3
+!   s1max = (v1 > s1max) * v1 + (v1 <= s1max) * s1max
+!   s1min = (v1 < s1min) * v1 + (v1 >= s1min) * s1min
+!   S1mean = S1sum / 8.
+!   S2mean = S2sum / 8.
+!   S3mean = S3sum / 8.
+!   dS1 = s1max - s1min
+!   *VWRITE,elem_id,vol,S1mean,S2mean,S3mean,dS1
+!   (E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5)
+!*ENDDO
+!*CFCLOSE
+
+! Selektion wiederherstellen
+ALLSEL,ALL
+
+! --- File B: Elementweises Knotenspannungs-Listing (-S.out) ---
+! PRESOL ist inhaerent ungemittelt (elementweise); kein AVRES noetig.
+! /PAGE verhindert ANSYS-Seitenumbrueche (minimiert Banner-Wiederholungen).
+/PAGE,99000000
+! Erhoehte PRESOL-Genauigkeit auf 9 sig figs (Default = 5).
+! Notwendig fuer STRESS=RAW Konsistenz-Korrektur (smax_nodal aus PRESOL),
+! sonst rundet PRESOL die Werte schon an der Quelle (z.B. 911.50518 -> 911.51).
+/FORMAT, 9, G, 20, 8
+/OUT, temp_EM_RAW_S, out
+PRESOL, S, PRIN
+/OUT
+/FORMAT, DEFA      ! Format auf Default zuruecksetzen
+/RENAME, 'temp_EM_RAW_S', 'out',, 'tables\%full_name%-S', 'out'
+
+! File A umbenennen und verschieben (-V.out)
+/RENAME, 'temp_EM_RAW_V', 'out',, 'tables\%full_name%-V', 'out'

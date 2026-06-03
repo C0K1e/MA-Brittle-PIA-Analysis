@@ -1,0 +1,120 @@
+!############################################################
+!#
+!# x_Export_VTK_Geometry.mac
+!#
+!# Erstellt: 2026-03-17 (CK)
+!#
+!# Zweck: Geometrie-Export fuer VTK/ParaView (EM-Cases).
+!# Gauss-Cases haben Geometrie bereits in VEFF_*.out,
+!# EM-Cases exportieren aber KEINE Knotenkoordinaten
+!# oder Element-Konnektivitaet. Dieses Makro schliesst
+!# diese Luecke.
+!#
+!# Basiert auf: x_Effektives_Volumen.mac (dme, 2016)
+!# und x_Effektives_Volumen_RAW.mac (CK, 2026)
+!#
+!# Aenderungen gegenueber den Vorlagen:
+!# - NUR Geometrie-Export (keine Faces, kein Fortran,
+!#   kein Parameter-File)
+!# - Element-IDs explizit in Spalte 1 (wie RAW-Variante)
+!# - Knotenselektion auf Elemente_Veff (nicht breiter)
+!# - Spannungen S1/S2/S3 als POINT_DATA (Visualisierung)
+!#
+!# Voraussetzung:
+!# Component "Elemente_Veff" muss definiert sein.
+!#
+!# Output:
+!# temp_VTK_Elemente.out  (nesel Zeilen, 9 Spalten:
+!#                         ElemID + 8 Eckknoten)
+!# temp_VTK_Nodes.out     (maxnode Zeilen, sparse,
+!#                         6 Spalten: X,Y,Z,S1,S2,S3)
+!#
+!# Die Dateien werden von 02-main.inp nach tables/
+!# umbenannt.
+!#
+!############################################################
+
+/POST1
+SET,LAST
+ALLSEL
+
+*GET,VTK_maxelem,ELEM,,NUM,MAX
+*GET,VTK_maxnode,NODE,,NUM,MAX
+
+CMSEL,S,Elemente_Veff
+NSLE,S,CORNER
+
+*GET,VTK_nesel,ELEM,,COUNT
+
+! =========================================================
+! 1. Element-Konnektivitaet (9 Spalten: ElemID + 8 Corner)
+! =========================================================
+VTK_eckpunkte=8
+
+! Binaere Maske: 1 fuer selektierte Elemente, 0 sonst
+*DEL,VTK_E_maske(1),,NOPR $ *DIM,VTK_E_maske,,VTK_maxelem
+
+! Sparse Array: Eckknoten pro Element (maxelem Zeilen)
+*DEL,VTK_Elemente(1,1),,NOPR $ *DIM,VTK_Elemente,,VTK_maxelem,VTK_eckpunkte
+
+*VGET,VTK_E_maske(1),ELEM,1,ESEL
+
+*DO,node_,1,VTK_eckpunkte
+    *VMASK,VTK_E_maske(1) $ *VGET,VTK_Elemente(1,node_),ELEM,1,NODE,node_
+*ENDDO
+
+! Kompakte Tabelle: ElemID in Spalte 1 (wie RAW-Variante)
+*DEL,VTK_SelElem(1,1),,NOPR $ *DIM,VTK_SelElem,,VTK_nesel,VTK_eckpunkte+1
+
+selem_=0
+*DO,nelem_,1,VTK_maxelem
+    *IF,VTK_Elemente(nelem_,1),NE,0,THEN
+        selem_=selem_+1
+        VTK_SelElem(selem_,1)=nelem_
+        *DO,node_,1,VTK_eckpunkte
+            VTK_SelElem(selem_,node_+1)=VTK_Elemente(nelem_,node_)
+        *ENDDO
+    *ENDIF
+*ENDDO
+
+! =========================================================
+! 2. Knoten: Koordinaten + Spannungen (sparse, 6 Spalten)
+! =========================================================
+! Selektion: Nur Eckknoten der Veff-Elemente
+ALLSEL
+CMSEL,S,Elemente_Veff
+NSLE,S,CORNER
+
+*DEL,VTK_maske_N(1),,NOPR $ *DIM,VTK_maske_N,,VTK_maxnode
+*DEL,VTK_Nodes(1,1),,NOPR $ *DIM,VTK_Nodes,,VTK_maxnode,6
+
+*VGET,VTK_maske_N(1),NODE,1,NSEL
+
+*VMASK,VTK_maske_N(1) $ *VGET,VTK_Nodes(1,1),NODE,1,LOC,X
+*VMASK,VTK_maske_N(1) $ *VGET,VTK_Nodes(1,2),NODE,1,LOC,Y
+*VMASK,VTK_maske_N(1) $ *VGET,VTK_Nodes(1,3),NODE,1,LOC,Z
+*VMASK,VTK_maske_N(1) $ *VGET,VTK_Nodes(1,4),NODE,1,S,1
+*VMASK,VTK_maske_N(1) $ *VGET,VTK_Nodes(1,5),NODE,1,S,2
+*VMASK,VTK_maske_N(1) $ *VGET,VTK_Nodes(1,6),NODE,1,S,3
+
+ALLSEL
+
+! =========================================================
+! 3. Dateien schreiben
+! =========================================================
+! Elemente: 9 Spalten (ElemID + 8 Eckknoten) — Hex only
+*MWRITE,VTK_SelElem(1,1),'temp_VTK_Elemente',out
+(F17.0,T17,F17.0,T33,F17.0,T49,F17.0,T65,F17.0,T81,F17.0,T97,F17.0,T113,F17.0,T129,F17.0,T145,' ')
+
+! Knoten: 6 Spalten (X,Y,Z,S1,S2,S3) — sparse
+*MWRITE,VTK_Nodes(1,1),'temp_VTK_Nodes',out
+(6E16.8)
+
+! =========================================================
+! Aufraeumen: APDL-Variablen loeschen
+! =========================================================
+*DEL,VTK_E_maske(1),,NOPR
+*DEL,VTK_Elemente(1,1),,NOPR
+*DEL,VTK_SelElem(1,1),,NOPR
+*DEL,VTK_maske_N(1),,NOPR
+*DEL,VTK_Nodes(1,1),,NOPR

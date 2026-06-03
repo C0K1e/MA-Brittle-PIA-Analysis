@@ -1,0 +1,321 @@
+/BATCH
+!###########################################################
+!# 02-MAIN.INP
+!###########################################################
+/CLEAR,NOSTART
+
+! PSEARCH hilft oft bei Makros, wir lassen es drin zur Sicherheit
+/PSEARCH,ON,..
+
+! 1. Parameter laden
+! (Diese Datei liegt LOKAL im Case-Ordner, daher KEIN ..\)
+/INPUT,current_params,inp
+
+! Default fuer optionalen VTK-Parameter (aeltere CSVs ohne VTK-Spalte)
+*IF,my_vtk,EQ,,THEN
+    my_vtk = 0
+*ENDIF
+
+/TITLE, %full_name%
+/FILNAME, %full_name%, 1
+
+! Pfade (relativ zum Unterordner)
+picdir = 'plots'
+tabdir = 'tables'
+
+!===========================================================
+! 2. Geometrie Weiche
+!===========================================================
+/PREP7
+
+*IF,my_case,EQ,'BEAM1',THEN
+    ! WICHTIG: ..\ davor setzen, da Datei im Elternordner liegt
+    /INPUT,..\geom_BEAM1,inp
+*ENDIF
+
+*IF,my_case,EQ,'PWH',THEN
+    ! WICHTIG: ..\ davor setzen, da Datei im Elternordner liegt
+    /INPUT,..\geom_PWH,inp
+*ENDIF
+
+*IF,my_case,EQ,'POR',THEN
+    ! Pressure on Ring (Ringdruckversuch)
+    /INPUT,..\geom_POR,inp
+*ENDIF
+
+FINISH
+
+!===========================================================
+! 3. Lösung
+!===========================================================
+! Standard-Knoten-Extrapolation (ERESX,DEFA) fuer die Production-Pipeline.
+/SOLU
+EQSLV,SPARSE
+OUTRES,ERASE
+OUTRES,ALL,ALL
+SOLVE
+FINISH
+
+!===========================================================
+! 4. Post-Processing Weiche
+!===========================================================
+/POST1
+SET,LAST
+
+/NOPR
+PRNSOL,S,PRIN
+/GOPR
+ALLSEL,ALL
+NSORT,S,1
+*GET,smax,SORT,0,MAX 
+
+
+! --- Fallunterscheidung ---
+
+! A) Gauss
+*IF,is_gauss,EQ,1,THEN
+    GAUSS_FAKT = gauss_ord
+    MMAX       = 50
+    SYMM_FAKT  = 1
+    ELDIM      = 34
+
+    *IF,my_case,EQ,'PWH',THEN
+    SYMM_FAKT  = 4
+    *ENDIF
+    *IF,my_case,EQ,'PWHR',THEN
+    SYMM_FAKT  = 4
+    *ENDIF
+    *IF,my_case,EQ,'3PB',THEN
+    SYMM_FAKT  = 4
+    *ENDIF
+    *IF,my_case,EQ,'POR',THEN
+    SYMM_FAKT  = 4
+    *ENDIF
+
+    ! Erst my_avg pruefen (RAW oder NOD) — abgeleitet aus v14-STRESS via run_manager
+    *IF,my_avg,EQ,'RAW',THEN
+        ! RAW: Geometrie-Export + PRESOL, KEIN Fortran (Python orchestriert)
+        /INPUT,..\post_GAUSS_RAW,inp
+    *ELSE
+        ! NOD + GP konsolidiert in post_GAUSS_unified.inp
+        ! GauszInfo-Rename ist intern conditional (nur bei NORM=GP)
+        /INPUT,..\post_GAUSS_unified,inp
+    *ENDIF
+*ENDIF
+
+! B) EM
+*IF,is_em,EQ,1,THEN
+    ! VTK Geometrie-Export (optional, nur bei EM + VTK=1)
+    ! Gauss-Cases haben Geometrie bereits in VEFF_*.out
+    *IF,my_vtk,EQ,1,THEN
+        /INPUT,..\x_Export_VTK_Geometry,mac
+        /RENAME,'temp_VTK_Nodes','out',,'tables\%full_name%_VTK_Nodes','out'
+        /RENAME,'temp_VTK_Elemente','out',,'tables\%full_name%_VTK_Elemente','out'
+    *ENDIF
+
+    ! LOC=A Surface-Pfad — AVG=NOD und AVG=RAW unterstuetzt
+    *IF,my_loc,EQ,'A',THEN
+        *IF,my_avg,EQ,'NOD',THEN
+            /INPUT,..\post_EM_NOD_surf,inp
+        *ENDIF
+        *IF,my_avg,EQ,'RAW',THEN
+            /INPUT,..\post_EM_RAW_surf,inp
+        *ENDIF
+    *ELSE
+        *IF,my_avg,EQ,'NOD',THEN
+            /INPUT,..\post_EM_NOD,inp
+        *ENDIF
+        *IF,my_avg,EQ,'RAW',THEN
+            /INPUT,..\post_EM_RAW,inp
+        *ENDIF
+    *ENDIF
+*ENDIF
+
+!===========================================================
+! 4.5 Pfad-Spannungen exportieren (Generisch, v7.2)
+!===========================================================
+! Exportiert Knotenspannungen entlang des Pfads Knoten_Pfad
+! als CSV in den tables/-Ordner.
+! Wird automatisch uebersprungen wenn die Named Selection fehlt
+! (z.B. bei BEAM1/BEAM2/3PB-Lastfaellen ohne Pfad-Definition).
+!===========================================================
+/POST1
+SET,LAST
+
+! Existenzpruefung: Starte mit leerer Knotenselektion, dann
+! Knoten_Pfad additiv hinzufuegen (CMSEL,A). Falls Component
+! nicht definiert ist, bleibt n_nodes = 0 -> sauberer Skip.
+/NOPR
+NSEL,NONE
+CMSEL,A,Knoten_Pfad
+*GET, n_nodes, NODE, 0, COUNT
+/GOPR
+
+*IF, n_nodes, GT, 0, THEN
+
+    ! Arrays dimensionieren
+    *DIM, coord_arr, ARRAY, n_nodes
+    *DIM, sx_arr, ARRAY, n_nodes
+
+    *GET, curr_node, NODE, 0, NUM, MIN
+
+    *DO, i, 1, n_nodes
+        ! ABSOLUTE Y-Koordinate holen (Kein Abzug von R_hole!)
+        *GET, y_val, NODE, curr_node, LOC, Y
+        coord_arr(i) = y_val
+
+        ! Erste Hauptspannung holen
+        *GET, sx_val, NODE, curr_node, S, 1
+        sx_arr(i) = sx_val
+
+        curr_node = NDNEXT(curr_node)
+    *ENDDO
+
+    ! Daten in CSV schreiben -> tables/{full_name}_path_stresses.csv
+    /CWD,tabdir
+    *CFOPEN, %full_name%_path_stresses, csv
+    *VWRITE
+    ('Coord_Y_mm,Stress_X_MPa')
+    *VWRITE, coord_arr(1), sx_arr(1)
+    (F10.5, ',', F15.5)
+    *CFCLOS
+    /CWD,'..'
+
+*ELSE
+    /NOPR
+    *MSG, NOTE
+    [v7.2] Pfad-Export uebersprungen: Component Knoten_Pfad nicht vorhanden.
+    /GOPR
+*ENDIF
+
+ALLSEL,ALL
+
+
+
+!===========================================================
+! 5. Bilder erstellen
+!===========================================================
+/POST1
+/RGB,INDEX,100,100,100,0  ! Weißer Hintergrund
+/RGB,INDEX, 80, 80, 80,13 ! Grautöne Anpassung
+/RGB,INDEX, 60, 60, 60,14
+/RGB,INDEX,  0,  0,  0,15 ! Schwarze Kanten
+
+/PBC,ALL,1      ! Randbedingungen anzeigen
+/EDGE,1,1       ! Kanten anzeigen
+/DSCALE,ALL,1   ! Wahre Skalierung
+/GRAPH,POWER    ! PowerGraphics an
+/EFACET,4       ! Glattere Darstellung
+
+! In den Plot-Ordner wechseln
+/CWD,picdir
+
+! NEU: AUFLÖSUNG ERHÖHEN
+! Setzt die Breite des Bildes auf 2400 Pixel (Höhe wird proportional skaliert)
+! Standard ist oft nur ~1000. Werte zwischen 2000 und 4000 sind für Druckqualität gut.
+/GFILE, 2400
+
+! Ansicht (case-abhaengig)
+! Standard: Isometrisch von schraeg oben (x1, y2, z3 - ANSYS-Default)
+/VIEW,1,1,2,3
+/ANG,1,0
+
+! POR: Zugseite liegt bei Z=0 (Unterseite) -> Ansicht von unten zeigt Zugspannungen
+*IF,my_case,EQ,'POR',THEN
+    /VIEW,1,0,0,-1      ! Kamera bei -Z, blickt in +Z-Richtung
+    /ANG,1,0
+*ENDIF
+
+! Grafiktreiber starten -> Schreibt in %full_name%000.png usw.
+/SHOW,png
+
+! ----------------------------------------------------------
+! Bild 1: Randbedingungen (Alles sichtbar)
+! ----------------------------------------------------------
+ALLSEL
+/AUTO,1         ! Auto-Zoom auf alles
+/TITLE, %full_name%: Randbedingungen
+PLDISP,2
+
+! ----------------------------------------------------------
+! Bild 2: Erste Hauptspannung (Ganzes Modell - Global)
+! ----------------------------------------------------------
+/TITLE, %full_name%: S1 (1. Hauptspannung - Global)
+PLNSOL,S,1
+
+! ----------------------------------------------------------
+! Bild 3: Spannung in X (Ganzes Modell - Global)
+! ----------------------------------------------------------
+/TITLE, %full_name%: SX (Normalspannung X - Global)
+PLNSOL,S,X
+
+! ----------------------------------------------------------
+! Bild 4: Zweite Hauptspannung (Ganzes Modell - Global)
+! ----------------------------------------------------------
+/TITLE, %full_name%: S2 (2. Hauptspannung - Global)
+PLNSOL,S,2
+
+! ----------------------------------------------------------
+! Bild 4: S1 NUR auf Knoten_Seff (Validierung Weibull)
+! Hier darf KEIN roter Fleck am Rand sein!
+! ----------------------------------------------------------
+! 1. Nur die Weibull-Knoten holen
+!CMSEL,S,Knoten_Seff
+
+! 2. Elemente holen für den Farbplot
+!ESLN,S,0
+
+! 3. Ansicht anpassen
+!/AUTO,1
+
+!/TITLE, %full_name%: S1 (Nur Knoten_Seff - Ohne Auflager!)
+!PLNSOL,S,1
+
+! ----------------------------------------------------------
+! Bild 5: S1 auf der GESAMTEN Unterseite (Zum Vergleich)
+! Hier wirst du den roten Fleck am Auflager sehen!
+! ----------------------------------------------------------
+!ALLSEL
+!ASEL,S,LOC,Y,0
+!NSLA,S,1
+!ESLN,S,0
+!/AUTO,1
+
+!/TITLE, %full_name%: S1 (Gesamte Unterseite - Mit Auflagerfehler)
+!PLNSOL,S,1
+
+! WICHTIG: Danach wieder alles auswählen
+!ALLSEL
+
+! ----------------------------------------------------------
+! Abschluss
+! ----------------------------------------------------------
+! Grafik schließen (schreibt Dateien final)
+/SHOW,CLOSE
+
+! --- UMBENENNEN ---
+! ANSYS zählt hoch: 000, 001, 002, 003, 004
+
+! 000 -> -rb
+/RENAME, '%full_name%000', 'png',, '%full_name%-rb', 'png'
+
+! 001 -> -s1
+/RENAME, '%full_name%001', 'png',, '%full_name%-s1', 'png'
+
+! 002 -> -sx
+/RENAME, '%full_name%002', 'png',, '%full_name%-sx', 'png'
+
+! 003 -> -s2
+/RENAME, '%full_name%003', 'png',, '%full_name%-s2', 'png'
+
+! 004 -> -s1-seff (Das Saubere)
+!/RENAME, '%full_name%004', 'png',, '%full_name%-s1-seff', 'png'
+
+! 004 -> -s1-bottom-full (Das mit Fehler)
+!/RENAME, '%full_name%004', 'png',, '%full_name%-s1-bottom-full', 'png'
+
+! Zurück in den Case-Ordner
+/CWD,'..'
+
+FINISH
+/EXIT

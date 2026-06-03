@@ -1,0 +1,63 @@
+! Geometrie Parameter
+L_beam = case_x
+H_beam = case_y
+T_beam = case_z
+midY = H_beam/2
+midZ = T_beam/2
+
+! Material
+MP,EX,1,1e5
+MP,NUXY,1,0.0
+
+ET,1,SOLID186   
+!Keyopt
+!1,2,1 für 14 Punkt Integration und
+!1,2,0 für 8 Punkt Integration (Standard)
+KEYOPT,1,2,0 
+
+! Geometrie
+BLOCK, 0, L_beam, 0, H_beam, 0, T_beam
+
+! Meshing
+LSEL,S,LOC,Y,0
+LSEL,R,LOC,Z,0
+LESIZE,ALL,,,nelx
+
+LSEL,S,LOC,X,0
+LSEL,R,LOC,Z,0
+LESIZE,ALL,,,nely
+
+LSEL,S,LOC,X,0
+LSEL,R,LOC,Y,0
+LESIZE,ALL,,,nelz
+
+ALLSEL
+VMESH,ALL
+
+! Gruppen definieren
+ALLSEL
+CM,Elemente_Veff,ELEM
+NSEL,S,LOC,Y,H_beam
+CM,Knoten_Seff,NODE
+ALLSEL
+
+! Randbedingungen
+NSEL,S,LOC,X,0
+D,ALL,UX,0
+NSEL,R,LOC,Y,midY
+D,ALL,UY,0
+NSEL,R,LOC,Z,midZ
+*GET,n_fix,NODE,0,NUM,MIN
+D,n_fix,UZ,0
+ALLSEL
+
+! Last
+M_total=-1000*load_F 
+k_pres=12*M_total/(T_beam*H_beam**3)
+
+SFGRAD,PRES,,Y,midY,k_pres
+ASEL,S,LOC,X,L_beam
+SFA,ALL,1,PRES,0
+ALLSEL
+
+/EOF

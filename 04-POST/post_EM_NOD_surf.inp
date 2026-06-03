@@ -1,0 +1,100 @@
+! =========================================================
+! post_EM_NOD_surf.inp — Elemental Mean Surface (LOC=A, v12.0.1)
+! =========================================================
+! Strategie E (ARFACE/NMFACE — ANSYS-natives Pattern):
+!   - NMFACE(E)        liefert die Face-Nummer eines Elements E,
+!                      deren Knoten alle in der aktuellen NSEL liegen
+!   - ARFACE(E)        liefert die Flaeche dieser Face (8-Knoten-Quad
+!                      bei SOLID186 — beruecksichtigt Mittelseiten)
+!   - NDFACE(E,FACE,n) liefert Knoten-IDs der Face
+!
+! Vorteile gegenueber Cross-Product:
+!   - Native ANSYS-Geometrie (exakt auch bei gekruemmten Faces)
+!   - ~30 Zeilen statt ~80 Zeilen APDL-Code
+!   - Keine manuelle Triangulation noetig
+!
+! Bleibt komplett in /POST1, erzeugt KEINE Elemente.
+!
+! Output: tables/{full_name}-A.out
+!   Spalten: face_id  parent_elem  area  S1_face  S2_face  S3_face
+! =========================================================
+
+! ----- 1) Setup: NSEL = Knoten_Seff, ESEL = Boundary-Solids -----
+ALLSEL
+CMSEL, S, Knoten_Seff        ! NSEL = alle Surface-Knoten (Eck + Mittelseiten)
+ESLN, S, 0                    ! ESEL = Solids mit ANY Knoten in Knoten_Seff
+CM, par_solids_a, ELEM        ! Parent-Solid-Component speichern
+
+! NSEL ist nun = Knoten_Seff (ESLN aendert ESEL nicht NSEL)
+*GET, n_solids, ELEM, 0, COUNT
+
+! ----- 2) Datei oeffnen, smax-Header + Spalten-Header schreiben -----
+! smax-Header in -A.out (analog zu -V.out fuer LOC=V).
+! Bisher fehlte dieser Header → Python-Reader fiel auf max(s1_face) zurueck,
+! was die NDX/EMX-Diskriminierung kollabieren liess. smax kommt aus
+! 02-main.inp via *GET,smax,SORT,0,MAX (globaler Knoten-Maximum-Wert).
+*CFOPEN, temp_EM_surf, out
+*VWRITE, smax
+('smax = ',ES16.8)
+*VWRITE, 'face_id', 'parent', 'area', 'S1', 'S2', 'S3', 'n1', 'n2', 'n3', 'n4'
+(10A14)
+
+! ----- 3) Iteration ueber Boundary-Solids -----
+face_counter = 0
+eid = 0
+*DO, ii, 1, n_solids
+    eid = ELNEXT(eid)
+    *IF, eid, EQ, 0, EXIT
+
+    ! Face-Nummer (Surface-Load-Key) deren Knoten alle in NSEL liegen
+    fid = NMFACE(eid)
+
+    *IF, fid, GT, 0, THEN
+        ! Native ANSYS Flaechen-Berechnung
+        my_area = ARFACE(eid)
+
+        *IF, my_area, GT, 0, THEN
+            face_counter = face_counter + 1
+
+            ! 4 Eckknoten der identifizierten Face
+            n1 = NDFACE(eid, fid, 1)
+            n2 = NDFACE(eid, fid, 2)
+            n3 = NDFACE(eid, fid, 3)
+            n4 = NDFACE(eid, fid, 4)
+
+            ! Nodal-gemittelte Hauptspannungen pro Eckknoten (12 Werte)
+            *GET, s1_n1, NODE, n1, S, 1
+            *GET, s2_n1, NODE, n1, S, 2
+            *GET, s3_n1, NODE, n1, S, 3
+
+            *GET, s1_n2, NODE, n2, S, 1
+            *GET, s2_n2, NODE, n2, S, 2
+            *GET, s3_n2, NODE, n2, S, 3
+
+            *GET, s1_n3, NODE, n3, S, 1
+            *GET, s2_n3, NODE, n3, S, 2
+            *GET, s3_n3, NODE, n3, S, 3
+
+            *GET, s1_n4, NODE, n4, S, 1
+            *GET, s2_n4, NODE, n4, S, 2
+            *GET, s3_n4, NODE, n4, S, 3
+
+            ! Mittel ueber 4 Eckknoten
+            s1_face = (s1_n1 + s1_n2 + s1_n3 + s1_n4) / 4.0
+            s2_face = (s2_n1 + s2_n2 + s2_n3 + s2_n4) / 4.0
+            s3_face = (s3_n1 + s3_n2 + s3_n3 + s3_n4) / 4.0
+
+            ! Zeile schreiben — 10 Spalten ab v12.1 (Format-Spec MUSS in Spalte 0 stehen)
+            *VWRITE, face_counter, eid, my_area, s1_face, s2_face, s3_face, n1, n2, n3, n4
+(E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5)
+        *ENDIF
+    *ENDIF
+*ENDDO
+*CFCLOS
+
+! ----- 4) Cleanup -----
+ALLSEL
+CMDELE, par_solids_a
+
+! ----- 5) Datei nach tables/ verschieben -----
+/RENAME, 'temp_EM_surf', 'out',, 'tables\%full_name%-A', 'out'

@@ -1,0 +1,69 @@
+/POST1
+ALLSEL,ALL
+
+! =================================================================
+! post_GAUSS_unified.inp
+!
+! Konsolidiert die fruehere Aufteilung in post_GAUSS_NOD.inp und
+! post_GAUSS_GaussNorm.inp zu einer Datei. Ruft die Unified-Fortran-EXE
+! auf; das Macro x_Effektives_Volumen_NOD.mac schreibt GaussPNorm = 0/1
+! basierend auf my_norm in effVol_Parameter.out, und die EXE entscheidet
+! intern, ob sie die GauszInfo-Datei schreibt (nur bei NORM=GP).
+!
+! Einziger NORM-spezifischer Schritt hier ist das /RENAME der GauszInfo-
+! Datei (nur sinnvoll bei NORM=GP, sonst existiert das File nicht und
+! /RENAME wuerde *** ERROR *** loggen).
+! =================================================================
+
+! 1. Makro aufrufen (NOD-Variante: nodal-gemittelte Spannungen)
+*USE,'..\x_Effektives_Volumen_NOD.mac',,smax,GAUSS_FAKT,MMAX,SYMM_FAKT,ELDIM
+
+! PIA_FIX-Schalter — Wahl zwischen Legacy- und PIAFix-EXE
+! my_pia_fix kommt aus current_params.inp (gesetzt von 01-run_manager.py).
+! 0 = Legacy (PIA-Aggregation an Knoten), 1 = PIAFix (PIA lokal am Gauss-Punkt).
+*IF, my_pia_fix, EQ, 1, THEN
+    ! 2a. PIAFix-EXE lokal kopieren + ausfuehren
+    /SYS, copy /Y "..\Effektives_Volumen_Unified_PIAFix.exe" .
+    /SYS, Effektives_Volumen_Unified_PIAFix.exe > fortran.log
+*ELSE
+    ! 2b. Legacy-EXE lokal kopieren + ausfuehren
+    /SYS, copy /Y "..\Effektives_Volumen_Unified.exe" .
+    /SYS, Effektives_Volumen_Unified.exe > fortran.log
+*ENDIF
+
+! /SYS hat keinen direkten Exit-Code-Check in APDL.
+! Workaround: nach EXE-Aufruf pruefen, ob das erwartete Output-File 'effVol.out'
+! existiert. Falls nicht -> EXE ist gecrashed (siehe fortran.log).
+exe_out_exists = 0
+/INQUIRE, exe_out_exists, EXIST, 'effVol', 'out'
+*IF, exe_out_exists, EQ, 0, THEN
+    /COM, !!! [APDL] FATAL: Fortran-EXE hat 'effVol.out' nicht erzeugt.
+    /COM, !!!         Wahrscheinliche Ursachen:
+    /COM, !!!           - Fortran-EXE crashed: siehe fortran.log
+    /COM, !!!           - effVol_Parameter.out fehlt (APDL-Macro-Fehler)
+    /COM, !!!           - Singularitaets-Toleranz verletzt (smax_elem vs smax_file > 5%)
+    /COM, !!!           - Bei PIA_FIX=1: PIAFix-EXE nicht compiliert
+    /COM, !!!         Aktion: fortran.log lesen, ggf. Re-Compile der Fortran-EXE.
+    /EOF
+*ENDIF
+
+! 4. Ergebnisse umbenennen (Standard-Outputs)
+/RENAME, 'effVol','out',,'tables\VEFF_%full_name%', 'out'
+/RENAME, 'effVol_Nodes','out',,'tables\VEFF_%full_name%_Nodes', 'out'
+/RENAME, 'effVol_Elemente','out',,'tables\VEFF_%full_name%_Elemente', 'out'
+/RENAME, 'effVol_Faces','out',,'tables\VEFF_%full_name%_Faces', 'out'
+/RENAME, 'effVol_Parameter','out',,'tables\VEFF_%full_name%_Parameter', 'out'
+
+! 5. Conditional: GauszInfo-Datei nur bei NORM=GP umbenennen
+*IF,my_norm,EQ,'GP',THEN
+    /RENAME, 'effVol_GauszInfo','out',,'tables\VEFF_%full_name%_GauszInfo', 'out'
+*ENDIF
+
+! 6. Aufraeumen
+/SYS, del effVol_Elemente
+/SYS, del effVol_Faces
+/SYS, del effVol_Parameter
+! beide EXE-Kopien aufraeumen (egal welche aktiv war)
+/SYS, del Effektives_Volumen_Unified.exe
+/SYS, del Effektives_Volumen_Unified_PIAFix.exe
+! fortran.log bleibt zur Kontrolle erhalten

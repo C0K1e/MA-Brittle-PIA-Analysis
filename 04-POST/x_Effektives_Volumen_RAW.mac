@@ -1,0 +1,271 @@
+!############################################################
+!#
+!# x_Effektives_Volumen_RAW.mac
+!#
+!# RAWNodes: RAW-Variante des Veff-Makros
+!# Basiert auf: x_Effektives_Volumen.mac (dme, 28.01.2016)
+!# Erstellt: 03.03.2026 (CK)
+!#
+!# Aenderungen gegenueber Standard-Makro:
+!# A) effVol_Elemente.out: 9 statt 8 Spalten (ElemID + 8 Knoten)
+!# B) effVol_Faces.out: 5 statt 4 Spalten (ParentIdx + 4 Knoten)
+!# C) effVol_NodeCoords.out: 3 Spalten (nur Koordinaten, keine Spannungen)
+!# D) effVol_Parameter.out: 2 zusaetzliche Zeilen (AVGModeRAW=1, GaussPNorm=0)
+!# E) KEIN Fortran-Aufruf (Python uebernimmt Orchestrierung)
+!#
+!# INPUT:
+!# *USE,'x_Effektives_Volumen_RAW.mac',FNAME,SMAX,GAUSS_FAKT,MMAX,SYMM,ELTYPE,BREITE
+!#
+!############################################################
+
+*IF,'%ARG1%',EQ,'0',THEN
+    Veff_ausgabename='effVol'
+*ELSE
+    Veff_ausgabename='%ARG1%'
+*ENDIF
+
+*IF,ARG3,LT,1,OR,ARG3,GT,26,THEN
+    Veff_gauss_faktor=3
+*ELSE
+    Veff_gauss_faktor=NINT(ARG3)
+*ENDIF
+
+*IF,ARG4,EQ,0,THEN
+    Veff_m_max=30
+*ELSEIF,ARG4,LT,0,THEN
+    Veff_m_max=0
+*ELSE
+    Veff_m_max=NINT(ARG4)
+*ENDIF
+
+*IF,ARG5,LT,1,THEN
+    Veff_symm_fakt=1
+*ELSE
+    Veff_symm_fakt=NINT(ARG5)
+*ENDIF
+
+*IF,'%ARG6%',EQ,'VIERECK',OR,'%ARG6%',EQ,'24',THEN
+    Veff_eckpunkte=4
+    Seff_facepoints=2
+    Seff_elemfaces=4
+    Veff_dim=24
+*ELSEIF,'%ARG6%',EQ,'TETRAEDER',OR,'%ARG6%',EQ,'33',THEN
+    Veff_eckpunkte=4
+    Seff_facepoints=3
+    Seff_elemfaces=4
+    Veff_dim=33
+*ELSEIF,'%ARG6%',EQ,'DREIECK',OR,'%ARG6%',EQ,'23',THEN
+    Veff_eckpunkte=3
+    Seff_facepoints=2
+    Seff_elemfaces=3
+    Veff_dim=23
+*ELSE
+    Veff_eckpunkte=8
+    Seff_facepoints=4
+    Seff_elemfaces=6
+    Veff_dim=34
+*ENDIF
+
+*IF,ARG7,LT,0,THEN
+    Veff_breite=-1
+*ELSE
+    Veff_breite=ARG7
+*ENDIF
+
+ALLSEL
+
+*GET,Veff_maxelem,ELEM,,NUM,MAX
+*GET,Veff_maxnode,NODE,,NUM,MAX
+
+CMSEL,S,Elemente_Veff
+NSLE,S,CORNER
+
+*GET,Veff_nesel,ELEM,,COUNT
+
+! Binaere Liste fuer selektierte Elemente
+*DEL,Veff_E_maske(1),,NOPR $ *DIM,Veff_E_maske,,Veff_maxelem
+
+! Array fuer Eckpunkte jedes Elements
+*DEL,Veff_Elemente(1,1),,NOPR $ *DIM,Veff_Elemente,,Veff_maxelem,Veff_eckpunkte
+
+*VGET,Veff_E_maske(1),ELEM,1,ESEL
+
+*DO,node_,1,Veff_eckpunkte
+    *VMASK,Veff_E_maske(1) $ *VGET,Veff_Elemente(1,node_),ELEM,1,NODE,node_
+*ENDDO
+
+! =================================================================
+! RAWNodes-A: Selektierte Elemente MIT globaler Element-ID (Spalte 1)
+! =================================================================
+! Spalte 1 = globale ANSYS Element-ID (nelem_)
+! Spalten 2..eckpunkte+1 = Eckknoten-IDs
+*DEL,Veff_SelElem(1,1),,NOPR $ *DIM,Veff_SelElem,,Veff_nesel,Veff_eckpunkte+1
+
+! Reverse-Mapping: global element nr -> sequentieller Index (fuer Face-Parents)
+*DEL,Veff_ElemIdx(1),,NOPR $ *DIM,Veff_ElemIdx,,Veff_maxelem
+
+selem_=0
+*DO,nelem_,1,Veff_maxelem
+    *IF,Veff_Elemente(nelem_,1),NE,0,THEN
+        selem_=selem_+1
+        Veff_SelElem(selem_,1)=nelem_
+        Veff_ElemIdx(nelem_)=selem_
+        *DO,node_,1,Veff_eckpunkte
+            Veff_SelElem(selem_,node_+1)=Veff_Elemente(nelem_,node_)
+        *ENDDO
+    *ENDIF
+*ENDDO
+
+! =================================================================
+! Face-Extraktion (mit Parent-Element-Index)
+! =================================================================
+CMSEL,S,Knoten_Seff
+ESLN,S
+NSLE,S,CORNER
+CMSEL,R,Knoten_Seff
+
+*GET,Seff_maxelem,ELEM,,NUM,MAX
+
+Seff_maxfaces=Seff_maxelem*Seff_elemfaces
+
+! RAWNodes-B: Face-Array mit Parent-Index (Spalte 1)
+! Spalte 1 = Parent-Element sequentieller Index (aus Veff_ElemIdx)
+! Spalten 2..facepoints+1 = Flaechenknoten-IDs
+*DEL,Seff_Faces(1,1),,NOPR $ *DIM,Seff_Faces,,Seff_maxfaces,Seff_facepoints+1
+
+*DO,el_,1,Seff_maxelem
+
+    maske_ES=ESEL(el_)
+
+    *IF,maske_ES,EQ,1,THEN
+        *DO,face_,1,Seff_elemfaces
+
+            sel_=1
+            *DO,node_,1,Seff_facepoints
+                sel_=sel_*(NSEL(NDFACE(el_,face_,node_))>0)
+            *ENDDO
+
+            *IF,sel_,GT,0,THEN
+                ! Spalte 1: Parent-Element sequentieller Index
+                Seff_Faces((el_-1)*Seff_elemfaces+face_,1)=Veff_ElemIdx(el_)
+                *DO,node_,1,Seff_facepoints
+                    Seff_Faces((el_-1)*Seff_elemfaces+face_,node_+1)=NDFACE(el_,face_,node_)
+                *ENDDO
+            *ENDIF
+
+        *ENDDO
+    *ENDIF
+*ENDDO
+
+! Verdichtung: Leere Zeilen entfernen
+Seff_nfaces=0
+*DO,face_,1,Seff_maxfaces
+    *IF,Seff_Faces(face_,2),NE,0,THEN
+        Seff_nfaces=Seff_nfaces+1
+    *ENDIF
+*ENDDO
+
+*DEL,Seff_SelFaces(1,1),,NOPR $ *DIM,Seff_SelFaces,,Seff_nfaces,Seff_facepoints+1
+
+selem_=0
+*DO,nelem_,1,Seff_maxfaces
+    *IF,Seff_Faces(nelem_,2),NE,0,THEN
+        selem_=selem_+1
+        ! Spalte 1: Parent-Index durchreichen
+        Seff_SelFaces(selem_,1)=Seff_Faces(nelem_,1)
+        *DO,node_,1,Seff_facepoints
+            Seff_SelFaces(selem_,node_+1)=Seff_Faces(nelem_,node_+1)
+        *ENDDO
+    *ENDIF
+*ENDDO
+
+! =================================================================
+! RAWNodes-C: Nur Koordinaten (keine Spannungen) -> effVol_NodeCoords.out
+! =================================================================
+ALLSEL
+
+ESEL,S,ELEM,,1,Veff_maxelem
+NSLE,S,CORNER
+
+*DEL,Veff_maske_N(1),,NOPR $ *DIM,Veff_maske_N,,Veff_maxnode
+*DEL,Veff_Nodes_Coords(1,1),,NOPR $ *DIM,Veff_Nodes_Coords,,Veff_maxnode,3
+
+*VGET,Veff_maske_N(1),NODE,1,NSEL
+
+*VMASK,Veff_maske_N(1) $ *VGET,Veff_Nodes_Coords(1,1),NODE,1,LOC,X
+*VMASK,Veff_maske_N(1) $ *VGET,Veff_Nodes_Coords(1,2),NODE,1,LOC,Y
+*VMASK,Veff_maske_N(1) $ *VGET,Veff_Nodes_Coords(1,3),NODE,1,LOC,Z
+
+ALLSEL
+
+! =================================================================
+! File-Output
+! =================================================================
+
+! RAWNodes-A: Elemente mit ElemID (9 Spalten fuer Hex)
+*IF,Veff_dim,EQ,34,THEN
+    *MWRITE,Veff_SelElem(1,1),'effVol_Elemente',out
+    (F17.0,T17,F17.0,T33,F17.0,T49,F17.0,T65,F17.0,T81,F17.0,T97,F17.0,T113,F17.0,T129,F17.0,T145,' ')
+    ! RAWNodes-B: Faces mit ParentIdx (5 Spalten fuer Hex)
+    *MWRITE,Seff_SelFaces(1,1),'effVol_Faces',out
+    (F17.0,T17,F17.0,T33,F17.0,T49,F17.0,T65,F17.0,T81,' ')
+*ELSEIF,Veff_dim,EQ,33,THEN
+    *MWRITE,Veff_SelElem(1,1),'effVol_Elemente',out
+    (F17.0,T17,F17.0,T33,F17.0,T49,F17.0,T65,F17.0,T81,' ')
+    *MWRITE,Seff_SelFaces(1,1),'effVol_Faces',out
+    (F17.0,T17,F17.0,T33,F17.0,T49,F17.0,T65,' ')
+*ELSEIF,Veff_dim,EQ,24,THEN
+    *MWRITE,Veff_SelElem(1,1),'effVol_Elemente',out
+    (F17.0,T17,F17.0,T33,F17.0,T49,F17.0,T65,F17.0,T81,' ')
+    *MWRITE,Seff_SelFaces(1,1),'effVol_Faces',out
+    (F17.0,T17,F17.0,T33,F17.0,T49,' ')
+*ELSE
+    *MWRITE,Veff_SelElem(1,1),'effVol_Elemente',out
+    (F17.0,T17,F17.0,T33,F17.0,T49,F17.0,T65,' ')
+    *MWRITE,Seff_SelFaces(1,1),'effVol_Faces',out
+    (F17.0,T17,F17.0,T33,F17.0,T49,' ')
+*ENDIF
+
+! RAWNodes-C: Nur Koordinaten (3 Spalten)
+*MWRITE,Veff_Nodes_Coords(1,1),'effVol_NodeCoords',out
+(3E16.8)
+
+! =================================================================
+! RAWNodes-D: Parameter-File (erweitert um Mode + GNorm)
+! =================================================================
+*CFOPEN,'effVol_Parameter',out,
+
+*VWRITE,'NAME:   ',Veff_ausgabename
+%-8c %32c
+
+*VWRITE,'smax:   ',ARG2
+(A8,ES16.8)
+
+*VWRITE,'Gauss:  ',Veff_gauss_faktor
+(A8,F17.0,T25,' ')
+
+*VWRITE,'Mmax:   ',Veff_m_max
+(A8,F17.0,T25,' ')
+
+*VWRITE,'Symm:   ',Veff_symm_fakt
+(A8,F17.0,T25,' ')
+
+*VWRITE,'Elem:   ',Veff_dim
+(A8,F17.0,T25,' ')
+
+*VWRITE,'Breite: ',Veff_breite
+(A8,F16.8)
+
+! RAWNodes: Neue Zeilen (Label als Format-Literal, F14.0 statt I14 -- MAPDL speichert Werte intern als REAL)
+*VWRITE,1
+('AVGModeRAW:',F14.0,' ')
+
+*VWRITE,0
+('GaussPNorm:',F14.0,' ')
+
+*CFCLOSE
+
+! =================================================================
+! RAWNodes-E: KEIN Fortran-Aufruf
+! Python uebernimmt: PRESOL-Parsing -> RawStress.out -> Fortran RAWNodes
+! =================================================================

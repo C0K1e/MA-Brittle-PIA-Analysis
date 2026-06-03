@@ -1,0 +1,38 @@
+/POST1
+ALLSEL,ALL
+
+! =================================================================
+! post_GAUSS_RAW.inp (RAWNodes)
+!
+! Gauss-Integration mit ungemittelten (RAW) Spannungen.
+! Zwei Aufgaben:
+!   1. Makro: Geometrie-Export (Elemente, Faces, Coords, Parameter)
+!   2. PRESOL: Elementweises Spannungslisting -> -S.out
+!
+! KEIN Fortran-Aufruf — Python orchestriert:
+!   parse_presol -> effVol_RawStress.out -> Effektives_Volumen_RAWNodes.exe
+! =================================================================
+
+! 1. Makro aufrufen (RAW-Variante: ElemIDs, Face-Parents, nur Coords)
+*USE,'..\x_Effektives_Volumen_RAW.mac',,smax,GAUSS_FAKT,MMAX,SYMM_FAKT,ELDIM
+
+! 2. Ergebnis-Dateien in tables/ verschieben
+/RENAME, 'effVol_Elemente','out',,'tables\VEFF_%full_name%_Elemente', 'out'
+/RENAME, 'effVol_Faces','out',,'tables\VEFF_%full_name%_Faces', 'out'
+/RENAME, 'effVol_NodeCoords','out',,'tables\VEFF_%full_name%_NodeCoords', 'out'
+/RENAME, 'effVol_Parameter','out',,'tables\VEFF_%full_name%_Parameter', 'out'
+
+! 3. PRESOL: Elementweises Knotenspannungs-Listing (-S.out)
+! PRESOL gibt inherent ungemittelte Werte pro Element und Knoten aus.
+! /PAGE verhindert ANSYS-Seitenumbrueche.
+ALLSEL,ALL
+/PAGE,99000000
+! Erhoehte PRESOL-Genauigkeit auf 9 sig figs (Default = 5).
+! Notwendig fuer STRESS=RAW Konsistenz-Korrektur (smax_nodal aus PRESOL).
+/FORMAT, 9, G, 20, 8
+/OUT, temp_GAUSS_RAW_S, out
+PRESOL, S, PRIN
+/OUT
+/FORMAT, DEFA      ! Format auf Default zuruecksetzen
+/RENAME, 'temp_GAUSS_RAW_S', 'out',, 'tables\%full_name%-S', 'out'
+

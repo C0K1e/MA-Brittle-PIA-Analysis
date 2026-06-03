@@ -1,0 +1,127 @@
+ALLSEL,ALL
+*GET, nElem, ELEM, 0, COUNT
+ETABLE, EVOL, VOLU
+
+*CFOPEN,temp_EM_NOD,out
+*VWRITE,'smax = ',smax
+(A7,E16.8)
+! HEADER ANPASSEN: dS1 hinzufügen
+*VWRITE,'Elem','Vol','S1_mean','S2_mean','S3_mean','dS1'
+(A12,1X,A12,1X,A12,1X,A12,1X,A12,1X,A12)
+
+*DO, elem_id, 1, nElem
+   *GET, vol, ELEM, elem_id, ETAB, EVOL
+   
+   *GET, n1, ELEM, elem_id, NODE, 1
+   *GET, n2, ELEM, elem_id, NODE, 2
+   *GET, n3, ELEM, elem_id, NODE, 3
+   *GET, n4, ELEM, elem_id, NODE, 4
+   *GET, n5, ELEM, elem_id, NODE, 5
+   *GET, n6, ELEM, elem_id, NODE, 6
+   *GET, n7, ELEM, elem_id, NODE, 7
+   *GET, n8, ELEM, elem_id, NODE, 8
+   
+   *IF,n1,EQ,0,CYCLE
+
+   S1sum = 0
+   S2sum = 0
+   S3sum = 0
+
+   ! Knoten 1
+   *GET, s1_1, NODE, n1, S, 1
+   *GET, s2_1, NODE, n1, S, 2
+   *GET, s3_1, NODE, n1, S, 3
+   S1sum = S1sum + s1_1
+   S2sum = S2sum + s2_1
+   S3sum = S3sum + s3_1
+
+   ! Knoten 2
+   *GET, s1_2, NODE, n2, S, 1
+   *GET, s2_2, NODE, n2, S, 2
+   *GET, s3_2, NODE, n2, S, 3
+   S1sum = S1sum + s1_2
+   S2sum = S2sum + s2_2
+   S3sum = S3sum + s3_2
+
+   ! Knoten 3
+   *GET, s1_3, NODE, n3, S, 1
+   *GET, s2_3, NODE, n3, S, 2
+   *GET, s3_3, NODE, n3, S, 3
+   S1sum = S1sum + s1_3
+   S2sum = S2sum + s2_3
+   S3sum = S3sum + s3_3
+
+   ! Knoten 4
+   *GET, s1_4, NODE, n4, S, 1
+   *GET, s2_4, NODE, n4, S, 2
+   *GET, s3_4, NODE, n4, S, 3
+   S1sum = S1sum + s1_4
+   S2sum = S2sum + s2_4
+   S3sum = S3sum + s3_4
+
+   ! Knoten 5
+   *GET, s1_5, NODE, n5, S, 1
+   *GET, s2_5, NODE, n5, S, 2
+   *GET, s3_5, NODE, n5, S, 3
+   S1sum = S1sum + s1_5
+   S2sum = S2sum + s2_5
+   S3sum = S3sum + s3_5
+
+   ! Knoten 6
+   *GET, s1_6, NODE, n6, S, 1
+   *GET, s2_6, NODE, n6, S, 2
+   *GET, s3_6, NODE, n6, S, 3
+   S1sum = S1sum + s1_6
+   S2sum = S2sum + s2_6
+   S3sum = S3sum + s3_6
+
+   ! Knoten 7
+   *GET, s1_7, NODE, n7, S, 1
+   *GET, s2_7, NODE, n7, S, 2
+   *GET, s3_7, NODE, n7, S, 3
+   S1sum = S1sum + s1_7
+   S2sum = S2sum + s2_7
+   S3sum = S3sum + s3_7
+
+   ! Knoten 8
+   *GET, s1_8, NODE, n8, S, 1
+   *GET, s2_8, NODE, n8, S, 2
+   *GET, s3_8, NODE, n8, S, 3
+   S1sum = S1sum + s1_8
+   S2sum = S2sum + s2_8
+   S3sum = S3sum + s3_8
+
+   ! Mittelwerte
+   S1mean = S1sum / 8.
+   S2mean = S2sum / 8.
+   S3mean = S3sum / 8.
+   
+   ! --- dS1 berechnen (Min/Max Logik) ---
+   s1max = s1_1
+   s1min = s1_1
+
+   s1max = (s1_2 > s1max) * s1_2 + (s1_2 <= s1max) * s1max
+   s1max = (s1_3 > s1max) * s1_3 + (s1_3 <= s1max) * s1max
+   s1max = (s1_4 > s1max) * s1_4 + (s1_4 <= s1max) * s1max
+   s1max = (s1_5 > s1max) * s1_5 + (s1_5 <= s1max) * s1max
+   s1max = (s1_6 > s1max) * s1_6 + (s1_6 <= s1max) * s1max
+   s1max = (s1_7 > s1max) * s1_7 + (s1_7 <= s1max) * s1max
+   s1max = (s1_8 > s1max) * s1_8 + (s1_8 <= s1max) * s1max
+
+   s1min = (s1_2 < s1min) * s1_2 + (s1_2 >= s1min) * s1min
+   s1min = (s1_3 < s1min) * s1_3 + (s1_3 >= s1min) * s1min
+   s1min = (s1_4 < s1min) * s1_4 + (s1_4 >= s1min) * s1min
+   s1min = (s1_5 < s1min) * s1_5 + (s1_5 >= s1min) * s1min
+   s1min = (s1_6 < s1min) * s1_6 + (s1_6 >= s1min) * s1min
+   s1min = (s1_7 < s1min) * s1_7 + (s1_7 >= s1min) * s1min
+   s1min = (s1_8 < s1min) * s1_8 + (s1_8 >= s1min) * s1min
+
+   dS1 = s1max - s1min
+
+   *VWRITE,elem_id,vol,S1mean,S2mean,S3mean,dS1
+   (F14.0,1X,E20.12,1X,E20.12,1X,E20.12,1X,E20.12,1X,E20.12)
+*ENDDO
+*CFCLOSE
+
+! Datei korrekt umbenennen und verschieben
+/RENAME, 'temp_EM_NOD', 'out',, 'tables\%full_name%', 'out'

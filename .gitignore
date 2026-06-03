@@ -1,0 +1,89 @@
+# ============================================================================
+# .gitignore — Public Release (Masterarbeit Brittle PIA Analysis)
+# ============================================================================
+
+# === Claude / Agent / privates Workflow-Zeug (NICHT veroeffentlichen) ===
+CLAUDE.md
+AGENTS.md
+CHANGELOG.md
+.claude/
+.cursor/
+.aider*
+.codeium/
+
+# === Lokale Maschinen-Konfiguration (ANSYS-Pfade etc.) ===
+# Echte Werte bleiben lokal; nur config_local.example.py wird committet.
+config_local.py
+config_local.json
+.env
+.env.*
+*.secret
+
+# === Plot-Helfer (lokal vorgehalten, im 3-Case-Release ohne Konsument) ===
+08-PLOTS/case_id_legend.py
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# === Virtuelle Umgebungen ===
+.venv/
+venv/
+env/
+ENV/
+
+# === IDEs ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Logs ===
+*.log
+
+# === ANSYS / Simulation-Output (grosse Binaerdateien) ===
+*.rst
+*.rth
+*.db
+*.full
+*.esav
+*.emat
+*.osav
+*.tri
+*.mode
+*.page
+*.err
+*.mntr
+*.ldhi
+*.rmg
+
+# === Fortran Build-Artefakte (regenerierbar; .exe + .f90 bleiben getrackt) ===
+*.obj
+*.mod
+
+# === Run-Daten / Exporte (nicht ins Code-Repo) ===
+05-RUNS/*
+!05-RUNS/.gitkeep
+*.vtk
+
+# === Temporaere Dateien ===
+*.tmp
+*.temp
+*.bak
+
+# === Jupyter Notebook Checkpoints ===
+.ipynb_checkpoints/
+
+# === Distribution / Packaging ===
+build/
+dist/
+*.egg-info/

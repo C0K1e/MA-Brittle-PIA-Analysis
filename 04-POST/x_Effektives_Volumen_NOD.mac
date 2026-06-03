@@ -1,0 +1,340 @@
+!############################################################
+!#
+!# x_Effektives_Volumen_NOD.mac
+!#
+!# von: dme (urspruenglich x_Effektives_Volumen.mac, 28.01.2016)
+!# Umbenannt fuer Naming-Symmetrie zu _RAW.mac
+!#
+!# Wirkung: vorbereiten von Element und Node Tabellen fuer
+!# das berechnen des effektiven Volumens durch ein externes
+!# Fortran-Programm.
+!#
+!# Achtung: um dieses Macro laufen lassen zu koennen
+!# muessen ZWEI COMPONENTS definiert sein:
+!#
+!# Elemente_Veff - ein Element-Component der Gueltigen
+!#                 Bereiche des Modells
+!# Knoten_Seff   - ein Node-Component der Gueltigen Bereiche
+!#                 der Oberflaeche
+!#
+!# Des weiteren sollten nur Elemente einer Geometrie (siehe
+!# ELTYPE) auf einmal berechnet werden. Fuer Modelle mit
+!# Tetraedern und Hexaedern bzw. Vierecken und Dreiecken
+!# sollte die Berechnung seperat mit beiden Elementtypen
+!# durchgefuehrt werden. Die Ergebnistabellen koennen
+!# spaeter addiert werden.
+!#
+!# INPUT:
+!# *USE,'Effektives_Volumen.mac',FNAME,SMAX,GAUSS_FAKT,MMAX,SYMM,ELTYPE,BREITE
+!#
+!# FNAME     := Name des Ausgabefiles (default: 'effVol')
+!#              Maximal 32 Zeichen
+!#
+!# SMAX      := Vergleichsspannung (kein default - muss gegeben werden!)
+!#              die Maximale Spannung im zu berechnenden Volumen
+!#              Wird nicht als Berechnungsgrundlage herangezogen,
+!#              sondern zum ueberpruefen der in den Tabellen
+!#              gefundenen Maximalspannung. (Abbruch bei zu
+!#              grosser Differenz)
+!#              SMAX <= 0 ... Berechnung laeuft ohne Check.
+!#
+!# GAUSS_FAKT:= Grad der Gauss-Legendre Quadratur (default: 3)
+!#              Gibt die Anzahl der Integrationspunkte fuer die
+!#              Approximation des Volumenintegrals
+!#
+!# MMAX      := Weibull-Modul bis zu dem das Veff berechnet
+!#              werden soll (default: 30)
+!#              Wird auf ganze Zahl gerundet.
+!#              MMAX < 0 ... Nur das Volumen der Probe ausgeben
+!#
+!# SYMM      := Symmetriefaktor (default: 1)
+!#              Multiplikation des berechneten Volumens fuer
+!#              Teilgeometrien
+!#
+!# ELTYPE    := Elementtyp 'HEXAEDER' 'TETRAEDER' 'VIERECK' 'DREIECK'
+!#              des FEM Modells (default: 'HEXAEDER')
+!#              ... hex-elemente, degenerated hex: pyramiden, tetraeder
+!#              ... reine tetraeder elemente
+!#              ... vierecke, degenerated 4-eck: 3-ecke
+!#              ... reine dreiecke elemente
+!#
+!# BREITE    := bei 2D Elementen die Breite der Geometrie (default: 0)
+!#              Bei BREITE < 0 wird im Fortran Programm die
+!#              Geometrie als Kreissymmetrisch angenommen!
+!#              VORSICHT: Dreieckige und Tetraedische Elemente
+!#              koennen hier zu unexakten Werten fuer Veff fuehren!
+!#
+!# CHANGELOG:
+!# 10.02. real-to-test fuer ARG6, Umordnen parameterfile
+!# 12.02. umstellung auf 1 NODE-file
+!# 20.02. Zusatz: PIA-OPTION
+!# 03.03. PIA wurde fix in Fortran eingebaut, gibt jetzt IMMER
+!#        aus. Option wieder entfernt
+!# 15.03. Element- und Face-Tabellen werden auf die
+!#        Selektierten Elemente/Flaechen reduziert.
+!#        Da Elementnummern nutzlos sind koennen leere
+!#        Eintraege problemlos verworfen werden!
+!#
+!############################################################
+
+*IF,'%ARG1%',EQ,'0',THEN
+    Veff_ausgabename='effVol'
+*ELSE
+    Veff_ausgabename='%ARG1%'
+*ENDIF
+
+*IF,ARG3,LT,1,OR,ARG3,GT,26,THEN
+    Veff_gauss_faktor=3
+*ELSE
+    Veff_gauss_faktor=NINT(ARG3)
+*ENDIF
+
+*IF,ARG4,EQ,0,THEN
+    Veff_m_max=30
+*ELSEIF,ARG4,LT,0,THEN
+    Veff_m_max=0
+*ELSE
+    Veff_m_max=NINT(ARG4)
+*ENDIF
+
+*IF,ARG5,LT,1,THEN
+    Veff_symm_fakt=1
+*ELSE
+    Veff_symm_fakt=NINT(ARG5)
+*ENDIF
+
+*IF,'%ARG6%',EQ,'VIERECK',OR,'%ARG6%',EQ,'24',THEN
+    Veff_eckpunkte=4               ! Anzahl der Eckpunkte eines jeden Elements
+    Seff_facepoints=2              ! Anzahl der Punkte die eine Elementflaeche ausmachen
+    Seff_elemfaces=4               ! Anzahl der Elementflaechen pro Element
+    Veff_dim=24
+*ELSEIF,'%ARG6%',EQ,'TETRAEDER',OR,'%ARG6%',EQ,'33',THEN
+    Veff_eckpunkte=4
+    Seff_facepoints=3
+    Seff_elemfaces=4
+    Veff_dim=33
+*ELSEIF,'%ARG6%',EQ,'DREIECK',OR,'%ARG6%',EQ,'23',THEN
+    Veff_eckpunkte=3
+    Seff_facepoints=2
+    Seff_elemfaces=3
+    Veff_dim=23
+*ELSE
+    Veff_eckpunkte=8
+    Seff_facepoints=4
+    Seff_elemfaces=6
+    Veff_dim=34
+*ENDIF
+
+*IF,ARG7,LT,0,THEN
+    Veff_breite=-1
+*ELSE
+    Veff_breite=ARG7
+*ENDIF
+
+ALLSEL
+
+*GET,Veff_maxelem,ELEM,,NUM,MAX    ! Gibt max. Elementnummer
+*GET,Veff_maxnode,NODE,,NUM,MAX    ! Gibt max. Knotennummer
+
+CMSEL,S,Elemente_Veff              ! Das zu berechnende Volumen waehlen
+NSLE,S,CORNER                      ! Die zu den gewaehlten Elementen gehoerende Eckennodes
+
+*GET,Veff_nesel,ELEM,,COUNT        ! Gibt Anzahl der selektierten Elemente
+
+! Definieren einer binaeren Liste die fuer jedes selektierte Element 1, sonst 0 ist
+*DEL,Veff_E_maske(1),,NOPR $ *DIM,Veff_E_maske,,Veff_maxelem
+
+! Definieren eines Arrays fuer die Eckpunkte jedes Elements bis zu hoechsten Elementnummer
+*DEL,Veff_Elemente(1,1),,NOPR $ *DIM,Veff_Elemente,,Veff_maxelem,Veff_eckpunkte
+
+*VGET,Veff_E_maske(1),ELEM,1,ESEL  ! Alle ESEL-Werte auf Array
+
+*DO,node_,1,Veff_eckpunkte         ! Nodes 1 - 'eckpunkte' auslesen (nur die Ecken-Nodes,
+                                    ! an denen die Spannungen gespeichert werden, alle
+                                    ! anderen nodes interessieren uns nicht!)
+    *VMASK,Veff_E_maske(1) $ *VGET,Veff_Elemente(1,node_),ELEM,1,NODE,node_
+*ENDDO
+
+! Definieren eines Arrays selektierter Elemente (also keine leeren oder mit 0 belegten Zeilen)
+*DEL,Veff_SelElem(1,1),,NOPR $ *DIM,Veff_SelElem,,Veff_nesel,Veff_eckpunkte
+
+! selem_ zaehlt die Zeilen der selektierten Elemente, nelem_ die globalen.
+! wenn immer eine Zeile der globalen Elementliste nicht Null enthaelt,
+! wird diese zum Array der selektierten Elemente angefuegt
+selem_=0
+*DO,nelem_,1,Veff_maxelem
+    *IF,Veff_Elemente(nelem_,1),NE,0,THEN
+        selem_=selem_+1
+        *DO,node_,1,Veff_eckpunkte
+            Veff_SelElem(selem_,node_)=Veff_Elemente(nelem_,node_)
+        *ENDDO
+    *ENDIF
+*ENDDO
+
+CMSEL,S,Knoten_Seff                ! Zu berechnende Oberflaeche auswaehlen
+ESLN,S                             ! Die zu der Oberflaeche gehoerenden Elemente
+NSLE,S,CORNER                      ! Die zu den Elementen gehoerenden Eckennodes
+CMSEL,R,Knoten_Seff                ! Von diesen Eckennodes wieder nur die, die zur Oberflaeche gehoeren
+
+*GET,Seff_maxelem,ELEM,,NUM,MAX    ! Gibt max. Elementnummer
+
+Seff_maxfaces=Seff_maxelem*Seff_elemfaces
+
+*DEL,Seff_Faces(1,1),,NOPR $ *DIM,Seff_Faces,,Seff_maxfaces,Seff_facepoints
+
+*DO,el_,1,Seff_maxelem             ! Elementweises auslesen der ersten selektierten Flaeche
+    
+    maske_ES=ESEL(el_)             ! Abfrage ob Element selektiert
+    
+    *IF,maske_ES,EQ,1,THEN
+        *DO,face_,1,Seff_elemfaces ! Nummer der Elementflaeche, zu der die gewaehlten nodes
+                                    ! gehoeren an der selektierten Flaeche liegen, soll diese
+            
+            ! Nur Wenn alle vier Punkte miteinbezogen werden:
+            sel_=1
+            *DO,node_,1,Seff_facepoints
+                ! NSEL(n) ist 1 wenn selektiert, 0 wenn undefiniert und -1 wenn unselektiert,
+                ! daher die (x>y) Funktion die den jeweils groesseren Wert nimmt (hier 1 oder 0).
+                ! NDFACE(e,f,n) gibt die globale Nodenummer des n-ten Punktes des f-ten Face des e-ten Elements
+                ! Nur wenn ALLE NSEL Aufrufe 1 ergeben bleibt auch sel_ 1 --> nur vollstaendig selektierte Faces werden aufgerufen
+                sel_=sel_*(NSEL(NDFACE(el_,face_,node_))>0)
+            *ENDDO
+            
+            *IF,sel_,GT,0,THEN
+                *DO,node_,1,Seff_facepoints
+                    Seff_Faces((el_-1)*Seff_elemfaces+face_,node_)=NDFACE(el_,face_,node_)  ! Eintragen der Nodes in Folge in Array
+                *ENDDO
+            *ENDIF
+            
+        *ENDDO
+    *ENDIF
+*ENDDO
+
+Seff_nfaces=0
+*DO,face_,1,Seff_maxfaces
+    *IF,Seff_Faces(face_,1),NE,0,THEN  ! Zeilenzeaehlen die nicht Null sind. Es gibt keinen *GET Befehl der die Anzahl der selektierten Flaechen ausgibt
+        Seff_nfaces=Seff_nfaces+1
+    *ENDIF
+*ENDDO
+
+*DEL,Seff_SelFaces(1,1),,NOPR $ *DIM,Seff_SelFaces,,Seff_nfaces,Seff_facepoints
+
+selem_=0
+*DO,nelem_,1,Seff_maxfaces
+    *IF,Seff_Faces(nelem_,1),NE,0,THEN
+        selem_=selem_+1
+        *DO,node_,1,Seff_facepoints
+            Seff_SelFaces(selem_,node_)=Seff_Faces(nelem_,node_)
+        *ENDDO
+    *ENDIF
+*ENDDO
+
+ALLSEL
+
+ESEL,S,ELEM,,1,Veff_maxelem
+NSLE,S,CORNER                      ! Die zu den gewaehlten Elementen gehoerende Eckennodes
+
+*DEL,Veff_maske_N(1),,NOPR $ *DIM,Veff_maske_N,,Veff_maxnode
+*DEL,Veff_Nodes_Gesamt(1,1),,NOPR $ *DIM,Veff_Nodes_Gesamt,,Veff_maxnode,6  ! Alle Koordinaten und Hauptspannungen der gewaehlten Eckennodes auf Array
+
+*VGET,Veff_maske_N(1),NODE,1,NSEL
+
+*VMASK,Veff_maske_N(1) $ *VGET,Veff_Nodes_Gesamt(1,1),NODE,1,LOC,X
+*VMASK,Veff_maske_N(1) $ *VGET,Veff_Nodes_Gesamt(1,2),NODE,1,LOC,Y
+*VMASK,Veff_maske_N(1) $ *VGET,Veff_Nodes_Gesamt(1,3),NODE,1,LOC,Z
+*VMASK,Veff_maske_N(1) $ *VGET,Veff_Nodes_Gesamt(1,4),NODE,1,S,1
+*VMASK,Veff_maske_N(1) $ *VGET,Veff_Nodes_Gesamt(1,5),NODE,1,S,2
+*VMASK,Veff_maske_N(1) $ *VGET,Veff_Nodes_Gesamt(1,6),NODE,1,S,3
+
+ALLSEL
+
+*IF,Veff_dim,EQ,34,THEN
+    *MWRITE,Veff_SelElem(1,1),'effVol_Elemente',out  ! 8 Eck-knoten
+    (F17.0,T17,F17.0,T33,F17.0,T49,F17.0,T65,F17.0,T81,F17.0,T97,F17.0,T113,F17.0,T129,' ')
+    *MWRITE,Seff_SelFaces(1,1),'effVol_Faces',out    ! 4 Flaechen-knoten
+    (F17.0,T17,F17.0,T33,F17.0,T49,F17.0,T65,' ')
+*ELSEIF,Veff_dim,EQ,33,THEN
+    *MWRITE,Veff_SelElem(1,1),'effVol_Elemente',out  ! 4 Eck-knoten
+    (F17.0,T17,F17.0,T33,F17.0,T49,F17.0,T65,' ')
+    *MWRITE,Seff_SelFaces(1,1),'effVol_Faces',out    ! 3 Flaechenknoten
+    (F17.0,T17,F17.0,T33,F17.0,T49,' ')
+*ELSEIF,Veff_dim,EQ,24,THEN
+    *MWRITE,Veff_SelElem(1,1),'effVol_Elemente',out  ! 4 Eck-knoten
+    (F17.0,T17,F17.0,T33,F17.0,T49,F17.0,T65,' ')
+    *MWRITE,Seff_SelFaces(1,1),'effVol_Faces',out    ! 2 Linienknoten
+    (F17.0,T17,F17.0,T33,' ')
+*ELSE
+    *MWRITE,Veff_SelElem(1,1),'effVol_Elemente',out  ! 3 Eckknoten
+    (F17.0,T17,F17.0,T33,F17.0,T49,' ')
+    *MWRITE,Seff_SelFaces(1,1),'effVol_Faces',out    ! 2 Linienknoten
+    (F17.0,T17,F17.0,T33,' ')
+*ENDIF
+
+*MWRITE,Veff_Nodes_Gesamt(1,1),'effVol_Nodes',out
+(6E16.8)
+
+*CFOPEN,'effVol_Parameter',out,
+
+*VWRITE,'NAME:   ',Veff_ausgabename
+%-8c %32c
+! Lange Strings muessen mit C-Formatierung definiert werden - APDL-Fortran laesst nur max. 8 Char zu!
+
+*VWRITE,'smax:   ',ARG2
+(A8,ES16.8)
+
+*VWRITE,'Gauss:  ',Veff_gauss_faktor
+(A8,F17.0,T25,' ')
+
+*VWRITE,'Mmax:   ',Veff_m_max
+(A8,F17.0,T25,' ')
+
+*VWRITE,'Symm:   ',Veff_symm_fakt
+(A8,F17.0,T25,' ')
+
+*VWRITE,'Elem:   ',Veff_dim
+(A8,F17.0,T25,' ')
+
+*VWRITE,'Breite: ',Veff_breite
+(A8,F16.8)
+
+! Unified: AVGModeRAW + GaussPNorm fuer Effektives_Volumen_Unified.exe
+! NOD-Pfad → AVGModeRAW=0; GaussPNorm aus my_norm (NOD=0, GP=1)
+! WICHTIG: *VWRITE braucht NUR EINEN Wert, das Label kommt aus dem Format-String!
+! (Doppelte Labels wurden frueher zu '**************' und '0.' in der Datei.)
+*VWRITE,0
+('AVGModeRAW:',F14.0,' ')
+
+*IF,my_norm,EQ,'GP',THEN
+    *VWRITE,1
+('GaussPNorm:',F14.0,' ')
+*ELSE
+    *VWRITE,0
+('GaussPNorm:',F14.0,' ')
+*ENDIF
+
+!*CFCLOS
+*CFCLOSE
+
+
+!*GET,OS_name,ACTIVE,,SYNAME
+!*IF,OS_name,EQ,'WINDOWS 64',OR,OS_name,EQ,'WINDOWS x64',THEN  ! Win64-Platforms
+!    /SYS,./Effektives_Volumen.exe
+!*ELSEIF,OS_name,EQ,'INTEL NT',THEN                            ! Win32-Platforms
+!    /SYS,./Effektives_Volumen.exe
+!*ELSE                                                          ! for unix-platforms: 'SGI64','LINUX IA32','LINUX IA64'
+!    /SYS,./Effektives_Volumen
+!*ENDIF
+
+! Auch den Linux Build 'Effektives_Volumen.exe' nennen, dann spart man sich das ganze Nach-dem-OS-fragen
+!/SYS,./Effektives_Volumen.exe
+
+
+! Unified: Eine EXE fuer beide Modi (NOD + GaussNorm)
+! Steuerung erfolgt ueber AVGModeRAW + GaussPNorm in effVol_Parameter.out
+!
+! /SYS-Aufruf hier auskommentiert. Der Wrapper
+! post_GAUSS_unified.inp:26 ist Single Source of Truth fuer den EXE-Start.
+! Frueher gab es einen Doppel-Aufruf (Macro startete EXE, Wrapper startete sie
+! nochmal). Idempotent (gleiche Inputs/Outputs), aber Performance-Penalty +
+! Code-Verwirrung. Jetzt klar: Macro = Geometrie-Export, Wrapper = EXE-Start.
+!/SYS,.\Effektives_Volumen_Unified.exe

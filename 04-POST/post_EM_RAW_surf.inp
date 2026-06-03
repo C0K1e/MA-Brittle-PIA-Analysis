@@ -1,0 +1,82 @@
+! =========================================================
+! post_EM_RAW_surf.inp — Elemental Mean Surface RAW (LOC=A, AVG=RAW, v12.1)
+! =========================================================
+! Strategie: ARFACE/NMFACE-Surface-Geometrie + PRESOL-RAW-Spannungen
+!   - Datei A (-A.out):   face_id, parent, area, S1=0, S2=0, S3=0, n1, n2, n3, n4
+!                         (Stresses sind Platzhalter — Python ersetzt aus PRESOL)
+!   - Datei B (-A-S.out): PRESOL,S,PRIN gefiltert auf Boundary-Solids
+!                         (gleiche Format wie Volumen-RAW -S.out)
+!
+! Python verarbeitet beide Dateien:
+!   - Geometrie aus -A.out: face_id, parent, area, n1..n4
+!   - RAW-Spannungen aus -A-S.out via parse_presol_to_csv()
+!   - Pro Face: 4 Eckknoten in Parent-Element finden, deren RAW-S1/S2/S3 mitteln
+!
+! Bleibt komplett in /POST1, erzeugt KEINE Elemente.
+! =========================================================
+
+! ----- 1) Setup: NSEL = Knoten_Seff, ESEL = Boundary-Solids -----
+ALLSEL
+CMSEL, S, Knoten_Seff
+ESLN, S, 0
+CM, par_solids_a, ELEM
+*GET, n_solids, ELEM, 0, COUNT
+
+! ----- 2) Datei A: smax-Header + Face-Geometrie + Knoten-IDs (10 Spalten) -----
+! smax-Header in -A.out (analog zu -V.out fuer LOC=V).
+! Bisher fehlte dieser Header → Python-Reader fiel auf max(s1_face) zurueck,
+! was die NDX/EMX-Diskriminierung kollabieren liess. smax kommt aus
+! 02-main.inp via *GET,smax,SORT,0,MAX (globaler Knoten-Maximum-Wert).
+*CFOPEN, temp_EM_RAW_surf_A, out
+*VWRITE, smax
+('smax = ',ES16.8)
+*VWRITE, 'face_id', 'parent', 'area', 'S1', 'S2', 'S3', 'n1', 'n2', 'n3', 'n4'
+(10A14)
+
+face_counter = 0
+eid = 0
+*DO, ii, 1, n_solids
+    eid = ELNEXT(eid)
+    *IF, eid, EQ, 0, EXIT
+
+    fid = NMFACE(eid)
+
+    *IF, fid, GT, 0, THEN
+        my_area = ARFACE(eid)
+
+        *IF, my_area, GT, 0, THEN
+            face_counter = face_counter + 1
+
+            n1 = NDFACE(eid, fid, 1)
+            n2 = NDFACE(eid, fid, 2)
+            n3 = NDFACE(eid, fid, 3)
+            n4 = NDFACE(eid, fid, 4)
+
+            ! Stress-Platzhalter (Python ersetzt aus PRESOL)
+            *VWRITE, face_counter, eid, my_area, 0.0, 0.0, 0.0, n1, n2, n3, n4
+(E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5,1X,E12.5)
+        *ENDIF
+    *ENDIF
+*ENDDO
+*CFCLOS
+
+! ----- 3) Datei B: PRESOL,S,PRIN gefiltert auf Boundary-Solids -----
+! PRESOL ist /POST1-faehig (kein Processor-Wechsel).
+! /PAGE verhindert ANSYS-Seitenumbrueche.
+CMSEL, S, par_solids_a
+/PAGE, 99000000
+! Erhoehte PRESOL-Genauigkeit auf 9 sig figs (Default = 5).
+! Notwendig fuer STRESS=RAW Konsistenz-Korrektur (smax_nodal aus PRESOL).
+/FORMAT, 9, G, 20, 8
+/OUT, temp_EM_RAW_surf_S, out
+PRESOL, S, PRIN
+/OUT
+/FORMAT, DEFA      ! Format auf Default zuruecksetzen
+
+! ----- 4) Cleanup -----
+ALLSEL
+CMDELE, par_solids_a
+
+! ----- 5) Beide Dateien nach tables/ verschieben -----
+/RENAME, 'temp_EM_RAW_surf_A', 'out',, 'tables\%full_name%-A', 'out'
+/RENAME, 'temp_EM_RAW_surf_S', 'out',, 'tables\%full_name%-A-S', 'out'

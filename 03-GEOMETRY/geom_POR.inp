@@ -1,0 +1,233 @@
+! =========================================================
+! geom_POR.inp - Pressure on Ring (Ringdruckversuch)
+! =========================================================
+! Viertelmodell einer flachen Keramikscheibe
+! Auflagerring R_sup = 22.73 mm (hardcoded Fixture-Konstante)
+! Gleichmaessiger Druck auf Oberseite, Zugseite = Unterseite (Z=0)
+!
+! Parameter aus CSV / current_params.inp:
+!   case_x = D_out (Aussendurchmesser, z.B. 50.8 mm)
+!   case_z = T_plate (Plattendicke, z.B. 1.5 mm)
+!   case_y = 0 (für debug zwecke Vergrößerungsfaktor)
+!   nelx   = Winkelrichtung (tangential + inneres Quadrat)
+!   nely   = Radialrichtung (innen, Quadrat bis R_sup)
+!   nelz   = Dickenrichtung (Extrusion)
+!   load_F = Gleichmaessiger Druck p [MPa]
+! =========================================================
+
+! =========================================================
+! 1. PARAMETER DEFINITION (Pressure on Ring Test)
+! =========================================================
+
+E_modul   = 607000           ! E-Modul in MPa (607 GPa)
+Nu_quer   = 0.22             ! Querkontraktionszahl
+P_load_1  = load_F/case_y
+P_load    = P_load_1/case_y         ! Flaechendruck in MPa
+
+R_out     = case_x*case_y/2             ! Aussenradius
+R_sup     = 22.73*case_y            ! Radius der Auflage (Support)
+L_sq      = 8.0*case_y              ! Kantenlaenge des inneren Quadrats
+T_plate   = case_z              ! Dicke der Scheibe in Z-Richtung
+
+! --- VERNETZUNGSPARAMETER ---
+*IF,nelx,LE,0,THEN
+   nelx = 10                 ! Anzahl Elemente tangential & inneres Quadrat
+*ENDIF
+*IF,nely,LE,0,THEN
+   nely = 15                 ! Anzahl Elemente radial innen
+*ENDIF
+*IF,nelz,LE,0,THEN
+   nelz = 3                  ! Anzahl Elemente ueber die Dicke
+*ENDIF
+
+n_out_calc = (nely / 6) + 0.4999
+nely_out = NINT(n_out_calc)  ! Aufrunden fuer das aeussere Restschnipsel
+
+! =========================================================
+! 2. MATERIAL & ELEMENTE
+! =========================================================
+
+/PREP7
+MP,EX,1,E_modul
+MP,NUXY,1,Nu_quer
+
+! 3D Element fuer das endgueltige Volumen
+ET,1,SOLID186   
+!Keyopt
+!1,2,1 für 14 Punkt Integration und
+!1,2,0 für 8 Punkt Integration (Standard)
+KEYOPT,1,2,0 
+
+! 2D Hilfselement fuer die Flaechenvernetzung
+ET,2,PLANE183
+
+! =========================================================
+! 3. GEOMETRIE ERSTELLUNG (Viertelmodell)
+! =========================================================
+
+PI = 3.14159265
+CS45 = COS(45*PI/180)
+SN45 = SIN(45*PI/180)
+
+! Keypoints
+K, 1, 0, 0, 0
+K, 2, L_sq, 0, 0
+K, 3, L_sq, L_sq, 0
+K, 4, 0, L_sq, 0
+K, 5, R_sup, 0, 0
+K, 6, R_sup*CS45, R_sup*SN45, 0
+K, 7, 0, R_sup, 0
+K, 8, R_out, 0, 0
+K, 9, R_out*CS45, R_out*SN45, 0
+K, 10, 0, R_out, 0
+
+! --- Linien ---
+! Inneres Quadrat
+L, 1, 2
+L, 2, 3
+L, 3, 4
+L, 4, 1
+
+! Radial innen
+L, 2, 5
+L, 3, 6
+L, 4, 7
+
+! Bogen innen
+LARC, 5, 6, 1, R_sup
+LARC, 6, 7, 1, R_sup
+
+! Radial aussen
+L, 5, 8
+L, 6, 9
+L, 7, 10
+
+! Bogen aussen
+LARC, 8, 9, 1, R_out
+LARC, 9, 10, 1, R_out
+
+! --- Flaechen ---
+AL, 1, 2, 3, 4
+AL, 2, 6, 8, 5
+AL, 3, 7, 9, 6
+AL, 8, 11, 13, 10
+AL, 9, 12, 14, 11
+
+! Flaechen verkleben fuer zusammenhaengendes Netz
+AGLUE, ALL
+
+! =========================================================
+! 4. VERNETZUNG (Zuweisung ueber Koordinaten-Filter)
+! =========================================================
+
+ALLSEL
+
+! --- A) GRUEN & ORANGE: nelx (Inneres Quadrat & Tangentiale Boegen) ---
+LSEL,S,LOC,X, 0, L_sq
+LSEL,R,LOC,Y, 0, L_sq
+LSEL,A,RADIUS,, R_sup
+LSEL,A,RADIUS,, R_out
+LESIZE,ALL,,,nelx
+ALLSEL
+
+! --- B) ROT: nely (Radial innen - vom Quadrat bis R_sup) ---
+LSEL,S,LOC,X, L_sq*1.01, R_sup*0.99
+LSEL,A,LOC,Y, L_sq*1.01, R_sup*0.99
+LSEL,U,RADIUS,, R_sup
+LSEL,U,RADIUS,, R_out
+CSYS,1
+LSEL,U,LOC,X, R_sup, R_out*1.1   ! Aeussere Restschnipsel abwaehlen
+CSYS,0
+LESIZE,ALL,,,nely
+ALLSEL
+
+! --- C) BRAUN: nely_out (Radial aussen - von R_sup bis R_out) ---
+CSYS,1
+LSEL,S,LOC,X, R_sup*1.01, R_out*0.99
+CSYS,0
+LSEL,U,RADIUS,, R_sup
+LSEL,U,RADIUS,, R_out
+LESIZE,ALL,,,nely_out
+ALLSEL
+
+! 2D Flaechen vernetzen
+TYPE, 2              ! Auf 2D-Hilfselement umschalten
+MSHKEY,1
+AMESH,ALL
+
+! =========================================================
+! 5. EXTRUSION & Z-VERNETZUNG
+! =========================================================
+
+TYPE, 1              ! Zurueck auf 3D-Volumenelement schalten
+EXTOPT, ESIZE, nelz
+EXTOPT, ACLEAR, 1    ! Loescht die 2D-Hilfselemente nach Extrusion
+VEXT, ALL, , , 0, 0, T_plate
+
+! Doppelte Knoten an den Klebestellen verschmelzen
+NUMMRG, NODE
+NUMCMP, ALL
+
+! =========================================================
+! 6. RANDBEDINGUNGEN & LASTEN
+! =========================================================
+
+ALLSEL
+
+! Symmetrie Y=0 (X-Achse)
+NSEL, S, LOC, Y, 0
+D, ALL, UY, 0
+
+! Symmetrie X=0 (Y-Achse)
+NSEL, S, LOC, X, 0
+D, ALL, UX, 0
+
+! Z-Sperre (Auflagering bei R_sup und Z=0)
+CSYS, 1
+NSEL, S, LOC, X, R_sup
+NSEL, R, LOC, Z, 0
+D, ALL, UZ, 0
+CSYS, 0
+ALLSEL
+
+! Drucklast auf Oberseite (Z=T_plate) innerhalb von R_sup
+ALLSEL
+ASEL, S, LOC, Z, T_plate
+CSYS, 1
+ASEL, R, LOC, X, 0, R_sup
+CSYS, 0
+SFA, ALL, 1, PRES, P_load
+ALLSEL
+
+! =========================================================
+! 7. KOMPONENTEN (Sets fuer Auswertung)
+! =========================================================
+
+! Volumen-Elemente
+CM, Elemente_Veff, ELEM
+
+! Effektive Oberflaeche (Unterseite = Zugseite)
+! Bereich erweitert von [0, R_sup] auf [0, R_out] = ganze Scheibe.
+! Begruendung: Die analytische Aeff-Formel _compute_aeff_por integriert ueber
+! die volle Scheibe via Plattenbiegungs-Loesung mit Faktor (R_s/R_d)^2 — nicht
+! nur ueber den Auflagerring. Numerisch muss konsistent integriert werden,
+! sonst entsteht eine systematische Aeff_num-vs-Aeff_ana-Diskrepanz (siehe
+! Diagnose: Aeff_ana(m=1) = 1956 mm^2 > pi*R_sup^2 = 1623 mm^2 —
+! analytische Formel reicht klar ueber R_sup hinaus).
+ALLSEL
+NSEL, S, LOC, Z, 0
+CSYS, 1
+NSEL, R, LOC, X, 0, R_out
+CSYS, 0
+CM, Knoten_Seff, NODE
+ALLSEL
+
+! --- Gruppen fuer Pfad-Auswertung ---
+ALLSEL
+NSEL, S, LOC, X, 0               ! Symmetriekante X=0 (entspricht der Y-Achse)
+NSEL, R, LOC, Z, 0               ! Unterseite (Zugseite)
+NSEL, R, LOC, Y, 0, R_out        ! Bereich vom Zentrum bis zum Aussenrand
+CM, Knoten_Pfad, NODE            ! Komponente fuer den Pfad erstellen
+ALLSEL
+
+/EOF
