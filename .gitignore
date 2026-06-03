@@ -1,26 +1,13 @@
 # ============================================================================
-# .gitignore — Public Release (Masterarbeit Brittle PIA Analysis)
+# .gitignore — Brittle PIA Analysis
 # ============================================================================
 
-# === Claude / Agent / privates Workflow-Zeug (NICHT veroeffentlichen) ===
-CLAUDE.md
-AGENTS.md
-CHANGELOG.md
-.claude/
-.cursor/
-.aider*
-.codeium/
-
 # === Lokale Maschinen-Konfiguration (ANSYS-Pfade etc.) ===
-# Echte Werte bleiben lokal; nur config_local.example.py wird committet.
 config_local.py
 config_local.json
 .env
 .env.*
 *.secret
-
-# === Plot-Helfer (lokal vorgehalten, im 3-Case-Release ohne Konsument) ===
-08-PLOTS/case_id_legend.py
 
 # === Python ===
 __pycache__/
